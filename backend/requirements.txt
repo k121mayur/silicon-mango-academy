@@ -4,4 +4,6 @@ sqlalchemy
 psycopg[binary]
 pydantic-settings
 python-dotenv
-
+python-multipart
+reportlab
+pypdf

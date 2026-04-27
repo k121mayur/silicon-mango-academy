@@ -1,6 +1,6 @@
-# Silicon Academy Portal
+# Silicon Mango Academy
 
-Initial full-stack scaffold for the Silicon Academy Portal using React on the frontend, FastAPI on the backend, and PostgreSQL as the database.
+Initial full-stack scaffold for Silicon Mango Academy using React on the frontend, FastAPI on the backend, and PostgreSQL as the database.
 
 ## Project Structure
 
@@ -56,7 +56,18 @@ The default database connection string is already configured in `backend/.env`:
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/silicon_academy
 ```
 
+The backend also auto-creates the master admin account on startup using these env values:
+
+```env
+MASTER_ADMIN_NAME=Master Admin
+MASTER_ADMIN_EMAIL=admin@siliconmango.academy
+MASTER_ADMIN_PASSWORD=Admin@123
+DEFAULT_INSTRUCTOR_PASSWORD=Instructor@123
+```
+
 ## Current API Routes
 
-- `GET /` returns a basic API startup message.
-- `GET /api/v1/health` returns a health payload used by the React starter screen.
+- `POST /api/v1/auth/login` authenticates admin, instructor, and student users.
+- `GET /api/v1/auth/me` returns the authenticated user.
+- `GET /api/v1/health` returns a health payload.
+- `/api/v1/admin/*` exposes admin-only endpoints for users, courses, batches, and instructor assignment.

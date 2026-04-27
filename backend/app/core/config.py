@@ -6,14 +6,27 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Silicon Academy Portal API"
+    app_name: str = "Silicon Mango Academy API"
     api_v1_prefix: str = "/api/v1"
     debug: bool = True
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/silicon_academy"
+    uploads_root: str = "uploads"
     allowed_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+    secret_key: str = "replace-this-for-production"
+    access_token_expire_minutes: int = 60 * 8
+    master_admin_name: str = "Master Admin"
+    master_admin_email: str = "admin@siliconmango.academy"
+    master_admin_password: str = "Admin@123"
+    default_instructor_password: str = "Instructor@123"
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_use_tls: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -33,6 +46,19 @@ class Settings(BaseSettings):
         if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
             return False
 
+        return value
+
+    @field_validator("smtp_use_tls", mode="before")
+    @classmethod
+    def parse_smtp_use_tls(cls, value: bool | str | None) -> bool | None:
+        if value is None or isinstance(value, bool):
+            return value
+
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
         return value
 
     @field_validator("allowed_origins", mode="before")
