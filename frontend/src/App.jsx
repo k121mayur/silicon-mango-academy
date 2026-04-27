@@ -2,8 +2,15 @@ import { startTransition, useEffect, useState } from "react";
 
 import AdminDashboard from "./AdminDashboard";
 import InstructorDashboard from "./InstructorDashboard";
-import { LandingPage, RoleHome } from "./shared";
-import { apiRequest, createInitialLoginForm, navigateTo, tokenStorageKey } from "./utils";
+import StudentDashboard from "./StudentDashboard";
+import { LandingPage } from "./shared";
+import {
+  apiRequest,
+  createInitialLoginForm,
+  createInitialSignupForm,
+  navigateTo,
+  tokenStorageKey,
+} from "./utils";
 
 function App() {
   const [pathname, setPathname] = useState(window.location.pathname);
@@ -13,7 +20,12 @@ function App() {
     user: null,
   });
   const [loginForm, setLoginForm] = useState(createInitialLoginForm());
+  const [signupForm, setSignupForm] = useState(createInitialSignupForm());
   const [loginState, setLoginState] = useState({
+    submitting: false,
+    error: "",
+  });
+  const [signupState, setSignupState] = useState({
     submitting: false,
     error: "",
   });
@@ -106,6 +118,14 @@ function App() {
     }));
   }
 
+  function handleSignupInputChange(event) {
+    const { name, value } = event.target;
+    setSignupForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
   function handleLogout() {
     window.localStorage.removeItem(tokenStorageKey);
     setAuthState({
@@ -164,6 +184,42 @@ function App() {
     }
   }
 
+  async function handleSignupSubmit(event) {
+    event.preventDefault();
+    setSignupState({
+      submitting: true,
+      error: "",
+    });
+
+    try {
+      const response = await apiRequest("/api/v1/auth/signup", {
+        method: "POST",
+        body: signupForm,
+      });
+
+      window.localStorage.setItem(tokenStorageKey, response.access_token);
+      setAuthState({
+        loading: false,
+        token: response.access_token,
+        user: response.user,
+      });
+      setSignupForm(createInitialSignupForm());
+      setSignupState({
+        submitting: false,
+        error: "",
+      });
+
+      startTransition(() => {
+        navigateTo("/portal", setPathname);
+      });
+    } catch (error) {
+      setSignupState({
+        submitting: false,
+        error: error.message || "Signup failed.",
+      });
+    }
+  }
+
   if (authState.loading) {
     return (
       <main className="portal-shell">
@@ -183,6 +239,10 @@ function App() {
         onChange={handleLoginInputChange}
         onSubmit={handleLoginSubmit}
         loginState={loginState}
+        signupForm={signupForm}
+        onSignupChange={handleSignupInputChange}
+        onSignupSubmit={handleSignupSubmit}
+        signupState={signupState}
       />
     );
   }
@@ -207,7 +267,7 @@ function App() {
     return null;
   }
 
-  return <RoleHome user={authState.user} onLogout={handleLogout} />;
+  return <StudentDashboard token={authState.token} user={authState.user} onLogout={handleLogout} />;
 }
 
 export default App;

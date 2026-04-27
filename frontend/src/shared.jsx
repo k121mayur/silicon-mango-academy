@@ -9,83 +9,150 @@ export function scrollToLogin() {
   });
 }
 
-export function LandingPage({ loginForm, onChange, onSubmit, loginState }) {
+export function LandingPage({
+  loginForm,
+  onChange,
+  onSubmit,
+  loginState,
+  signupForm,
+  onSignupChange,
+  onSignupSubmit,
+  signupState,
+}) {
+  const [authMode, setAuthMode] = useState("signup");
+
   return (
     <main className="page-shell">
       <header className="hero-header">
         <div>
           <p className="brand-mark">Silicon Mango Academy</p>
-          <h1 className="brand-title">A focused academy portal for structured teaching operations.</h1>
+          <h1 className="brand-title">Learn practical skills with structured guidance and measurable progress.</h1>
         </div>
 
         <button className="ghost-button" type="button" onClick={scrollToLogin}>
-          Login
+          Sign In
         </button>
       </header>
 
       <section className="hero-layout">
         <div className="hero-copy">
-          <p className="eyebrow">Academics. Structure. Delivery.</p>
-          <h2 className="hero-heading">Run batches, course plans, recorded content, grading, and certificates from one system.</h2>
+          <p className="eyebrow">Explore. Practice. Grow.</p>
+          <h2 className="hero-heading">Build momentum with courses, live batches, recordings, assignments, and certificates.</h2>
           <p className="hero-text">
-            The portal now supports admin-defined course plans, instructor inheritance,
-            live and recorded batch workflows, attendance, grading, and certificate release.
+            Sign up with your email and password, complete your learner profile, and enter a dashboard
+            shaped around courses, progress, resources, and upcoming sessions.
           </p>
 
           <div className="hero-points">
-            <div className="feature-chip">Batch-driven delivery mode</div>
-            <div className="feature-chip">Course plan inheritance</div>
-            <div className="feature-chip">Certificate release workflows</div>
+            <div className="feature-chip">Personalised recommendations</div>
+            <div className="feature-chip">Live and recorded learning</div>
+            <div className="feature-chip">Progress and certificates</div>
           </div>
 
           <div className="hero-cta">
             <button className="primary-button" type="button" onClick={scrollToLogin}>
-              Open Login
+              Start Learning
             </button>
-            <span className="secondary-note">Use the master admin account configured in `backend/.env`.</span>
+            <span className="secondary-note">Existing admin and instructor accounts can sign in here too.</span>
           </div>
         </div>
 
         <section className="login-panel" id="login-panel">
-          <div className="panel-badge">Login</div>
-          <h3>Sign in to Silicon Mango Academy</h3>
+          <div className="panel-badge">{authMode === "signup" ? "Student Signup" : "Login"}</div>
+          <h3>{authMode === "signup" ? "Create your student account" : "Sign in to Silicon Mango Academy"}</h3>
           <p className="panel-copy">
-            Admin, instructor, and student accounts authenticate with email and password.
+            {authMode === "signup"
+              ? "Use your email and password. Your profile form opens after your first login."
+              : "Admin, instructor, and student accounts authenticate with email and password."}
           </p>
 
-          <form className="stack-form" onSubmit={onSubmit}>
-            <label className="field">
-              <span>Email</span>
-              <input
-                name="email"
-                type="email"
-                autoComplete="email"
-                value={loginForm.email}
-                onChange={onChange}
-                placeholder="admin@siliconmango.academy"
-                required
-              />
-            </label>
-
-            <label className="field">
-              <span>Password</span>
-              <input
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={loginForm.password}
-                onChange={onChange}
-                placeholder="Enter your password"
-                required
-              />
-            </label>
-
-            {loginState.error && <p className="feedback error">{loginState.error}</p>}
-
-            <button className="primary-button full-width" type="submit" disabled={loginState.submitting}>
-              {loginState.submitting ? "Signing in..." : "Login"}
+          <div className="auth-mode-tabs" role="tablist" aria-label="Authentication mode">
+            <button
+              className={`auth-mode-button ${authMode === "signup" ? "active" : ""}`}
+              type="button"
+              onClick={() => setAuthMode("signup")}
+            >
+              Sign Up
             </button>
-          </form>
+            <button
+              className={`auth-mode-button ${authMode === "login" ? "active" : ""}`}
+              type="button"
+              onClick={() => setAuthMode("login")}
+            >
+              Login
+            </button>
+          </div>
+
+          {authMode === "signup" ? (
+            <form className="stack-form" onSubmit={onSignupSubmit}>
+              <label className="field">
+                <span>Email</span>
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  value={signupForm.email}
+                  onChange={onSignupChange}
+                  placeholder="you@example.com"
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span>Password</span>
+                <input
+                  name="password"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength="6"
+                  value={signupForm.password}
+                  onChange={onSignupChange}
+                  placeholder="Create a password"
+                  required
+                />
+              </label>
+
+              {signupState.error && <p className="feedback error">{signupState.error}</p>}
+
+              <button className="primary-button full-width" type="submit" disabled={signupState.submitting}>
+                {signupState.submitting ? "Creating account..." : "Sign Up"}
+              </button>
+            </form>
+          ) : (
+            <form className="stack-form" onSubmit={onSubmit}>
+              <label className="field">
+                <span>Email</span>
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  value={loginForm.email}
+                  onChange={onChange}
+                  placeholder="admin@siliconmango.academy"
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span>Password</span>
+                <input
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={loginForm.password}
+                  onChange={onChange}
+                  placeholder="Enter your password"
+                  required
+                />
+              </label>
+
+              {loginState.error && <p className="feedback error">{loginState.error}</p>}
+
+              <button className="primary-button full-width" type="submit" disabled={loginState.submitting}>
+                {loginState.submitting ? "Signing in..." : "Login"}
+              </button>
+            </form>
+          )}
         </section>
       </section>
     </main>

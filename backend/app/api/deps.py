@@ -56,3 +56,12 @@ def get_current_instructor(current_user: Annotated[User, Depends(get_current_use
             detail="Instructor access is required.",
         )
     return current_user
+
+
+def get_current_student(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+    if current_user.role != UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Student access is required.",
+        )
+    return current_user

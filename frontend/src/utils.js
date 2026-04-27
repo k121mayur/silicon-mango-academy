@@ -91,6 +91,13 @@ export function createInitialLoginForm() {
   };
 }
 
+export function createInitialSignupForm() {
+  return {
+    email: "",
+    password: "",
+  };
+}
+
 export function createInitialCertificateConfig() {
   return {
     student_name: { x: 180, y: 280, font_size: 26 },

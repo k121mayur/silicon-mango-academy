@@ -43,6 +43,19 @@ class UserRole(str, Enum):
     STUDENT = "student"
 
 
+class StudentOccupation(str, Enum):
+    EMPLOYEE = "employee"
+    SELF_EMPLOYED = "self_employed"
+    BUSINESS = "business"
+    HOMEMAKER = "homemaker"
+    STUDENT = "student"
+
+
+class StudentPaymentStatus(str, Enum):
+    PAID = "paid"
+    FAILED = "failed"
+
+
 class CourseType(str, Enum):
     LIVE = "live"
     SELF_PACED = "self_paced"
@@ -161,6 +174,11 @@ class User(TimestampMixin, Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    student_profile: Mapped[StudentProfile | None] = relationship(
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     assigned_courses: Mapped[list[CourseInstructor]] = relationship(
         back_populates="instructor",
         cascade="all, delete-orphan",
@@ -196,6 +214,11 @@ class User(TimestampMixin, Base):
         back_populates="released_by",
         foreign_keys="CertificateIssue.released_by_id",
     )
+    student_payments: Mapped[list[StudentPayment]] = relationship(
+        back_populates="student",
+        foreign_keys="StudentPayment.student_id",
+        cascade="all, delete-orphan",
+    )
 
 
 class InstructorProfile(TimestampMixin, Base):
@@ -228,6 +251,72 @@ class InstructorSkill(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     instructor_profile: Mapped[InstructorProfile] = relationship(back_populates="skills")
+
+
+class StudentProfile(TimestampMixin, Base):
+    __tablename__ = "student_profiles"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    first_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    middle_name: Mapped[str | None] = mapped_column(String(120))
+    last_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    mobile_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    city: Mapped[str] = mapped_column(String(120), nullable=False)
+    occupation: Mapped[StudentOccupation] = mapped_column(
+        _value_enum(StudentOccupation),
+        nullable=False,
+        index=True,
+    )
+
+    user: Mapped[User] = relationship(back_populates="student_profile")
+    educations: Mapped[list[StudentEducation]] = relationship(
+        back_populates="student_profile",
+        cascade="all, delete-orphan",
+        order_by="StudentEducation.sort_order",
+    )
+    experiences: Mapped[list[StudentExperience]] = relationship(
+        back_populates="student_profile",
+        cascade="all, delete-orphan",
+        order_by="StudentExperience.sort_order",
+    )
+
+
+class StudentEducation(TimestampMixin, Base):
+    __tablename__ = "student_educations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("student_profiles.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    qualification: Mapped[str] = mapped_column(String(180), nullable=False)
+    institution: Mapped[str | None] = mapped_column(String(255))
+    field_of_study: Mapped[str | None] = mapped_column(String(180))
+    completion_year: Mapped[str | None] = mapped_column(String(20))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    student_profile: Mapped[StudentProfile] = relationship(back_populates="educations")
+
+
+class StudentExperience(TimestampMixin, Base):
+    __tablename__ = "student_experiences"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("student_profiles.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    organisation: Mapped[str] = mapped_column(String(255), nullable=False)
+    post: Mapped[str] = mapped_column(String(180), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    student_profile: Mapped[StudentProfile] = relationship(back_populates="experiences")
 
 
 class Course(TimestampMixin, Base):
@@ -444,6 +533,11 @@ class Batch(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="CertificateIssue.created_at",
     )
+    student_payments: Mapped[list[StudentPayment]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+        order_by="StudentPayment.created_at",
+    )
 
 
 class BatchScheduleSlot(TimestampMixin, Base):
@@ -502,6 +596,36 @@ class BatchEnrollment(TimestampMixin, Base):
 
     batch: Mapped[Batch] = relationship(back_populates="enrollments")
     student: Mapped[User] = relationship(back_populates="batch_enrollments", foreign_keys=[student_id])
+
+
+class StudentPayment(TimestampMixin, Base):
+    __tablename__ = "student_payments"
+    __table_args__ = (UniqueConstraint("reference_id", name="uq_student_payment_reference"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(
+        ForeignKey("batches.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(40), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[StudentPaymentStatus] = mapped_column(
+        _value_enum(StudentPaymentStatus),
+        nullable=False,
+        default=StudentPaymentStatus.PAID,
+        server_default=StudentPaymentStatus.PAID.value,
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    batch: Mapped[Batch] = relationship(back_populates="student_payments")
+    student: Mapped[User] = relationship(back_populates="student_payments", foreign_keys=[student_id])
 
 
 class BatchSession(TimestampMixin, Base):
