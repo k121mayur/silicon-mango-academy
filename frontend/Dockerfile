@@ -25,6 +25,10 @@ FROM nginx:alpine
 # Copy compiled static assets from build step
 COPY --from=build /app/dist /usr/share/nginx/html
 
+# Explicitly ensure Nginx worker processes have read access to the compiled files.
+# This prevents cross-platform file permission errors (e.g. building from Windows hosts).
+RUN chmod -R 755 /usr/share/nginx/html
+
 # Replace standard Nginx configurations with custom routes
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
