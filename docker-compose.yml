@@ -1,16 +1,86 @@
 services:
+  # ------------------------------------------------------------------------------
+  # Database Service (PostgreSQL)
+  # ------------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: silicon-academy-postgres
+    restart: always
     environment:
-      POSTGRES_DB: silicon_academy
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-silicon_academy}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    # Internal exposure only. Avoids server-level conflicts and database attacks.
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  # ------------------------------------------------------------------------------
+  # Backend API Service (FastAPI)
+  # ------------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: silicon-academy-backend
+    restart: always
+    environment:
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-silicon_academy}
+      - SECRET_KEY=${SECRET_KEY:-replace-this-for-production-very-secure-key-123}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      - MASTER_ADMIN_NAME=${MASTER_ADMIN_NAME:-Master Admin}
+      - MASTER_ADMIN_EMAIL=${MASTER_ADMIN_EMAIL:-admin@siliconmango.academy}
+      - MASTER_ADMIN_PASSWORD=${MASTER_ADMIN_PASSWORD:-Admin@123}
+      - DEFAULT_INSTRUCTOR_PASSWORD=${DEFAULT_INSTRUCTOR_PASSWORD:-Instructor@123}
+      - RAZORPAY_MODE=${RAZORPAY_MODE:-test}
+      - RAZORPAY_TEST_KEY_ID=${RAZORPAY_TEST_KEY_ID}
+      - RAZORPAY_TEST_KEY_SECRET=${RAZORPAY_TEST_KEY_SECRET}
+      - RAZORPAY_LIVE_KEY_ID=${RAZORPAY_LIVE_KEY_ID}
+      - RAZORPAY_LIVE_KEY_SECRET=${RAZORPAY_LIVE_KEY_SECRET}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+    # Internal exposure only. The Nginx frontend will proxy requests internally.
+    expose:
+      - "8000"
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------------------
+  # Frontend Gateway Service (Nginx React SPA & Proxy)
+  # ------------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=/
+    container_name: silicon-academy-frontend
+    restart: always
+    ports:
+      # Maps the configurable host port (defaults to 8085) to Nginx's port 80 inside the container.
+      # Point your Cloudflare Tunnel host to http://localhost:8085
+      - "${FRONTEND_PORT:-8085}:80"
+    depends_on:
+      - backend
+
+# ------------------------------------------------------------------------------
+# Persistent Volumes Definition
+# ------------------------------------------------------------------------------
 volumes:
   postgres_data:
-
+  backend_uploads:

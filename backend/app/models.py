@@ -52,6 +52,7 @@ class StudentOccupation(str, Enum):
 
 
 class StudentPaymentStatus(str, Enum):
+    PENDING = "pending"
     PAID = "paid"
     FAILED = "failed"
 
@@ -157,6 +158,13 @@ class TimestampMixin:
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class AppSetting(TimestampMixin, Base):
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class User(TimestampMixin, Base):
@@ -616,11 +624,17 @@ class StudentPayment(TimestampMixin, Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     payment_method: Mapped[str] = mapped_column(String(40), nullable=False)
     reference_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    gateway_mode: Mapped[str | None] = mapped_column(String(20))
+    razorpay_order_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    razorpay_payment_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    razorpay_signature: Mapped[str | None] = mapped_column(String(256))
+    receipt_file_path: Mapped[str | None] = mapped_column(String(500))
+    receipt_public_url: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[StudentPaymentStatus] = mapped_column(
         _value_enum(StudentPaymentStatus),
         nullable=False,
-        default=StudentPaymentStatus.PAID,
-        server_default=StudentPaymentStatus.PAID.value,
+        default=StudentPaymentStatus.PENDING,
+        server_default=StudentPaymentStatus.PENDING.value,
     )
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

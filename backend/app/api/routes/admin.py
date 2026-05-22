@@ -44,11 +44,14 @@ from app.schemas.admin import (
     CourseRead,
     InstructorCreate,
     InstructorRead,
+    RazorpayModeUpdate,
+    RazorpaySettingsRead,
     StudentCreate,
     StudentRead,
 )
 from app.schemas.instructor import BatchCompletionRequest
 from app.services.certificates import ensure_batch_certificate_ready, release_certificates_for_students
+from app.services.payments import build_razorpay_settings_summary, set_razorpay_mode
 from app.services.planning import (
     get_course_duration_label,
     get_minimum_course_span_days,
@@ -342,6 +345,27 @@ def list_students(
 ) -> list[StudentRead]:
     students = db.scalars(_student_query()).all()
     return [StudentRead.model_validate(student) for student in students]
+
+
+@router.get("/payment-settings", response_model=RazorpaySettingsRead)
+def read_payment_settings(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_admin)],
+) -> RazorpaySettingsRead:
+    return RazorpaySettingsRead(**build_razorpay_settings_summary(db))
+
+
+@router.put("/payment-settings/mode", response_model=RazorpaySettingsRead)
+def update_payment_mode(
+    payload: RazorpayModeUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_admin)],
+) -> RazorpaySettingsRead:
+    try:
+        set_razorpay_mode(db, payload.active_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return RazorpaySettingsRead(**build_razorpay_settings_summary(db))
 
 
 @router.post("/courses", response_model=CourseRead, status_code=status.HTTP_201_CREATED)

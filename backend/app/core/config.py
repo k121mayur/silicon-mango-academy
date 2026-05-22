@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_from_email: str | None = None
     smtp_use_tls: bool = True
+    razorpay_mode: str = "test"
+    razorpay_test_key_id: str | None = None
+    razorpay_test_key_secret: str | None = None
+    razorpay_live_key_id: str | None = None
+    razorpay_live_key_secret: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

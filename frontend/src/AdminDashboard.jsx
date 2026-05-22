@@ -67,6 +67,7 @@ export default function AdminDashboard({ token, user, onLogout }) {
     instructors: [],
     students: [],
     courses: [],
+    paymentSettings: null,
   });
   const [notice, setNotice] = useState({ type: "", message: "" });
   const [submitting, setSubmitting] = useState("");
@@ -194,10 +195,11 @@ export default function AdminDashboard({ token, user, onLogout }) {
   async function loadAdminData() {
     try {
       setAdminData((current) => ({ ...current, loading: true, error: "" }));
-      const [instructors, students, courses] = await Promise.all([
+      const [instructors, students, courses, paymentSettings] = await Promise.all([
         apiRequest("/api/v1/admin/users/instructors", { token }),
         apiRequest("/api/v1/admin/users/students", { token }),
         apiRequest("/api/v1/admin/courses", { token }),
+        apiRequest("/api/v1/admin/payment-settings", { token }),
       ]);
       setAdminData({
         loading: false,
@@ -205,6 +207,7 @@ export default function AdminDashboard({ token, user, onLogout }) {
         instructors,
         students,
         courses,
+        paymentSettings,
       });
     } catch (error) {
       if (error.status === 401) {
@@ -218,6 +221,7 @@ export default function AdminDashboard({ token, user, onLogout }) {
         instructors: [],
         students: [],
         courses: [],
+        paymentSettings: null,
       });
     }
   }
@@ -559,6 +563,19 @@ export default function AdminDashboard({ token, user, onLogout }) {
     );
   }
 
+  async function handlePaymentModeChange(mode) {
+    setSubmitting("payment-settings");
+    await submitWithRefresh(
+      () =>
+        apiRequest("/api/v1/admin/payment-settings/mode", {
+          method: "PUT",
+          body: { active_mode: mode },
+          token,
+        }),
+      `Razorpay ${formatEnumLabel(mode)} mode activated.`,
+    );
+  }
+
   const eligibleInstructors = selectedInstructorBatch
     ? adminData.instructors.filter((instructor) =>
         selectedInstructorBatch.course.instructor_assignments.some(
@@ -572,11 +589,29 @@ export default function AdminDashboard({ token, user, onLogout }) {
     { label: "Total Batches", value: batches.length, helper: "Live and recorded" },
     { label: "Instructors", value: adminData.instructors.length, helper: "Teaching staff" },
     { label: "Students", value: adminData.students.length, helper: "Learner accounts" },
+    {
+      label: "Payments",
+      value: formatEnumLabel(adminData.paymentSettings?.active_mode || "test"),
+      helper: "Razorpay mode",
+    },
   ];
 
   const activeBatches = batches.filter((batch) => batch.status === "active");
   const completedBatches = batches.filter((batch) => batch.status === "completed");
   const recentBatches = batches.slice(0, 5);
+  const paymentSettings = adminData.paymentSettings;
+  const paymentModeOptions = [
+    {
+      mode: "test",
+      configured: Boolean(paymentSettings?.test_configured),
+      keyId: paymentSettings?.test_key_id || "Not set",
+    },
+    {
+      mode: "live",
+      configured: Boolean(paymentSettings?.live_configured),
+      keyId: paymentSettings?.live_key_id || "Not set",
+    },
+  ];
 
   const adminMenuItems = [
     {
@@ -632,6 +667,12 @@ export default function AdminDashboard({ token, user, onLogout }) {
       label: "Batch Operations",
       shortLabel: "OP",
       description: "Course plans, completion, and release",
+    },
+    {
+      id: "payments",
+      label: "Payments",
+      shortLabel: "PY",
+      description: "Razorpay keys, mode, and checkout status",
     },
     {
       id: "directories",
@@ -742,6 +783,10 @@ export default function AdminDashboard({ token, user, onLogout }) {
                   <button className="selector-card" type="button" onClick={() => setActiveAdminSection("batch-operations")}>
                     <strong>Batch Operations</strong>
                     <span>Manage course plans, completion, and certificate release.</span>
+                  </button>
+                  <button className="selector-card" type="button" onClick={() => setActiveAdminSection("payments")}>
+                    <strong>Payments</strong>
+                    <span>Switch Razorpay test and live checkout modes.</span>
                   </button>
                 </div>
               </SectionCard>
@@ -1331,6 +1376,65 @@ export default function AdminDashboard({ token, user, onLogout }) {
             </SectionCard>
             </div>
           </section>
+
+          <div hidden={activeAdminSection !== "payments"}>
+            <SectionCard title="Payments" subtitle="Razorpay Checkout">
+              {!paymentSettings ? (
+                <EmptyState title="Payment settings unavailable" body="Razorpay settings could not be loaded." />
+              ) : (
+                <div className="detail-stack">
+                  <div className="meta-row">
+                    <span className="detail-pill">Active: {formatEnumLabel(paymentSettings.active_mode)}</span>
+                    <span className="detail-pill">
+                      Test Keys: {paymentSettings.test_configured ? "Configured" : "Missing"}
+                    </span>
+                    <span className="detail-pill">
+                      Live Keys: {paymentSettings.live_configured ? "Configured" : "Missing"}
+                    </span>
+                  </div>
+
+                  <div className="quick-action-grid">
+                    {paymentModeOptions.map((option) => {
+                      const isActive = paymentSettings.active_mode === option.mode;
+                      return (
+                        <button
+                          className={`selector-card ${isActive ? "selected" : ""}`}
+                          key={option.mode}
+                          type="button"
+                          onClick={() => handlePaymentModeChange(option.mode)}
+                          disabled={isActive || !option.configured || submitting === "payment-settings"}
+                        >
+                          <strong>{formatEnumLabel(option.mode)} Mode</strong>
+                          <span>{option.configured ? `Key ID: ${option.keyId}` : "Keys missing in backend .env"}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="record-list">
+                    <article className="record-item compact">
+                      <div>
+                        <h4>Test Key ID</h4>
+                        <p>{paymentSettings.test_key_id || "Not configured"}</p>
+                      </div>
+                      <span className="detail-pill">
+                        {paymentSettings.test_configured ? "Ready" : "Missing Secret"}
+                      </span>
+                    </article>
+                    <article className="record-item compact">
+                      <div>
+                        <h4>Live Key ID</h4>
+                        <p>{paymentSettings.live_key_id || "Not configured"}</p>
+                      </div>
+                      <span className="detail-pill">
+                        {paymentSettings.live_configured ? "Ready" : "Missing Secret"}
+                      </span>
+                    </article>
+                  </div>
+                </div>
+              )}
+            </SectionCard>
+          </div>
 
           <section className="dashboard-grid two-one">
             <div hidden={activeAdminSection !== "certificates"}>

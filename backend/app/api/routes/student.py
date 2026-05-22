@@ -41,13 +41,24 @@ from app.schemas.student import (
     StudentEnrollmentRead,
     StudentEnrollmentPaymentResponse,
     StudentNextSessionRead,
+    StudentPaymentOrderRead,
     StudentPaymentRead,
+    StudentPaymentVerifyRequest,
     StudentProfileRead,
     StudentProfileUpdate,
     StudentScheduleSlotRead,
     StudentSessionResourceRead,
 )
+from app.services.payments import (
+    PaymentGatewayError,
+    amount_to_paise,
+    create_razorpay_order,
+    get_active_razorpay_credentials,
+    get_razorpay_credentials_for_mode,
+    verify_razorpay_signature,
+)
 from app.services.planning import seed_batch_planning
+from app.services.receipts import generate_payment_receipt_pdf
 
 router = APIRouter(prefix="/student", tags=["student"])
 
@@ -95,6 +106,7 @@ def _student_enrollment_query(student_id: int):
             .selectinload(Batch.assignments)
             .selectinload(Assignment.submissions),
             selectinload(BatchEnrollment.batch).selectinload(Batch.certificate_issues),
+            selectinload(BatchEnrollment.batch).selectinload(Batch.student_payments),
         )
         .order_by(BatchEnrollment.created_at.desc())
     )
@@ -333,6 +345,16 @@ def _build_enrollment(enrollment: BatchEnrollment) -> StudentEnrollmentRead:
     present_attendance = [
         record for record in attendance_records if record.status.value in {"present", "late"}
     ]
+    paid_payments = [
+        payment
+        for payment in batch.student_payments
+        if payment.student_id == student_id and payment.status == StudentPaymentStatus.PAID
+    ]
+    latest_payment = (
+        sorted(paid_payments, key=lambda payment: payment.created_at, reverse=True)[0]
+        if paid_payments
+        else None
+    )
 
     return StudentEnrollmentRead(
         enrollment_id=enrollment.id,
@@ -368,6 +390,7 @@ def _build_enrollment(enrollment: BatchEnrollment) -> StudentEnrollmentRead:
         next_session=_build_next_session(batch),
         recent_resources=_build_recent_resources(batch),
         certificate=_build_certificate(batch, student_id),
+        payment=StudentPaymentRead.model_validate(latest_payment) if latest_payment else None,
     )
 
 
@@ -381,6 +404,74 @@ def _get_student_enrollment(db: Session, enrollment_id: int, student_id: int) ->
             detail="Enrollment was not found.",
         )
     return enrollment
+
+
+def _get_existing_course_enrollment(
+    db: Session,
+    *,
+    course_id: int,
+    student_id: int,
+) -> BatchEnrollment | None:
+    return db.scalar(
+        select(BatchEnrollment)
+        .join(Batch, Batch.id == BatchEnrollment.batch_id)
+        .where(
+            BatchEnrollment.student_id == student_id,
+            Batch.course_id == course_id,
+        )
+    )
+
+
+def _ensure_batch_can_be_purchased(
+    db: Session,
+    *,
+    batch_id: int,
+    current_user: User,
+) -> tuple[StudentProfile, Batch]:
+    profile = db.scalar(_profile_query(current_user.id))
+    if not _is_profile_complete(profile):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Complete your profile before enrolling in a course.",
+        )
+
+    batch = db.scalar(_batch_checkout_query(batch_id))
+    if batch is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+    if batch.status != BatchStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active batches are open for enrollment.",
+        )
+    if _is_batch_full(batch):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This batch has no available seats.",
+        )
+
+    existing_course_enrollment = _get_existing_course_enrollment(
+        db,
+        course_id=batch.course_id,
+        student_id=current_user.id,
+    )
+    if existing_course_enrollment is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You are already enrolled in this course.",
+        )
+
+    return profile, batch
+
+
+def _create_payment_reference(db: Session) -> str:
+    for _ in range(10):
+        reference_id = f"SMA-{secrets.token_hex(8).upper()}"
+        existing_reference = db.scalar(
+            select(StudentPayment.id).where(StudentPayment.reference_id == reference_id)
+        )
+        if existing_reference is None:
+            return reference_id
+    return f"SMA-{secrets.token_hex(12).upper()}"
 
 
 @router.get("/dashboard", response_model=StudentDashboardRead)
@@ -456,66 +547,190 @@ def update_student_profile(
 
 
 @router.post(
-    "/batches/{batch_id}/enroll",
-    response_model=StudentEnrollmentPaymentResponse,
+    "/batches/{batch_id}/payment-order",
+    response_model=StudentPaymentOrderRead,
     status_code=status.HTTP_201_CREATED,
 )
-def pay_and_enroll_in_batch(
+def create_batch_payment_order(
     batch_id: int,
-    payload: StudentBatchPaymentRequest,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_student)],
-) -> StudentEnrollmentPaymentResponse:
-    profile = db.scalar(_profile_query(current_user.id))
-    if not _is_profile_complete(profile):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Complete your profile before enrolling in a course.",
-        )
-
-    batch = db.scalar(_batch_checkout_query(batch_id))
-    if batch is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
-    if batch.status != BatchStatus.ACTIVE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only active batches are open for enrollment.",
-        )
-    if _is_batch_full(batch):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This batch has no available seats.",
-        )
-
-    existing_course_enrollment = db.scalar(
-        select(BatchEnrollment)
-        .join(Batch, Batch.id == BatchEnrollment.batch_id)
-        .where(
-            BatchEnrollment.student_id == current_user.id,
-            Batch.course_id == batch.course_id,
-        )
+) -> StudentPaymentOrderRead:
+    profile, batch = _ensure_batch_can_be_purchased(
+        db,
+        batch_id=batch_id,
+        current_user=current_user,
     )
-    if existing_course_enrollment is not None:
+    amount = _get_payable_amount(batch.course)
+    amount_paise = amount_to_paise(amount)
+    if amount_paise <= 0:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="You are already enrolled in this course.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Razorpay checkout requires a payable amount greater than zero.",
+        )
+
+    try:
+        credentials = get_active_razorpay_credentials(db)
+    except PaymentGatewayError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    reference_id = _create_payment_reference(db)
+    try:
+        order = create_razorpay_order(
+            credentials,
+            amount_paise=amount_paise,
+            receipt=reference_id,
+            notes={
+                "course_id": str(batch.course_id),
+                "batch_id": str(batch.id),
+                "student_id": str(current_user.id),
+            },
+        )
+    except PaymentGatewayError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    razorpay_order_id = str(order.get("id") or "")
+    if not razorpay_order_id:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Razorpay did not return an order id.",
         )
 
     payment = StudentPayment(
         batch_id=batch.id,
         student_id=current_user.id,
-        amount=_get_payable_amount(batch.course),
-        payment_method=payload.payment_method,
-        reference_id=f"SMA-{secrets.token_hex(6).upper()}",
-        status=StudentPaymentStatus.PAID,
-        paid_at=datetime.now(timezone.utc),
+        amount=amount,
+        payment_method="razorpay",
+        reference_id=reference_id,
+        gateway_mode=credentials.mode,
+        razorpay_order_id=razorpay_order_id,
+        status=StudentPaymentStatus.PENDING,
     )
-    enrollment = BatchEnrollment(batch_id=batch.id, student_id=current_user.id)
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+
+    return StudentPaymentOrderRead(
+        key_id=credentials.key_id,
+        mode=credentials.mode,
+        order_id=razorpay_order_id,
+        payment_id=payment.id,
+        amount=amount,
+        amount_in_paise=amount_paise,
+        currency=str(order.get("currency") or "INR"),
+        receipt_id=reference_id,
+        course_title=batch.course.title,
+        batch_id=batch.id,
+        student_name=current_user.name,
+        student_email=current_user.email,
+        student_contact=profile.mobile_number,
+    )
+
+
+@router.post(
+    "/payments/verify",
+    response_model=StudentEnrollmentPaymentResponse,
+)
+def verify_payment_and_enroll(
+    payload: StudentPaymentVerifyRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_student)],
+) -> StudentEnrollmentPaymentResponse:
+    payment = db.scalar(
+        select(StudentPayment).where(
+            StudentPayment.student_id == current_user.id,
+            StudentPayment.razorpay_order_id == payload.razorpay_order_id,
+        )
+    )
+    if payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment order was not found.",
+        )
+    if payment.razorpay_order_id != payload.razorpay_order_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment order mismatch.")
+
+    batch = db.scalar(_batch_checkout_query(payment.batch_id))
+    if batch is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+    if payment.status == StudentPaymentStatus.PAID:
+        enrollment = _get_existing_course_enrollment(
+            db,
+            course_id=batch.course_id,
+            student_id=current_user.id,
+        )
+        if enrollment is None:
+            enrollment = BatchEnrollment(batch_id=batch.id, student_id=current_user.id)
+            db.add(enrollment)
+            db.commit()
+        created_enrollment = _get_student_enrollment(db, enrollment.id, current_user.id)
+        return StudentEnrollmentPaymentResponse(
+            payment=StudentPaymentRead.model_validate(payment),
+            enrollment=_build_enrollment(created_enrollment),
+        )
+    if payment.status == StudentPaymentStatus.FAILED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This payment order has already failed. Start a new payment.",
+        )
+
+    try:
+        credentials = get_razorpay_credentials_for_mode(payment.gateway_mode or "test")
+    except PaymentGatewayError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    verified = verify_razorpay_signature(
+        order_id=payment.razorpay_order_id or "",
+        payment_id=payload.razorpay_payment_id,
+        signature=payload.razorpay_signature,
+        key_secret=credentials.key_secret,
+    )
+    if not verified:
+        payment.status = StudentPaymentStatus.FAILED
+        payment.razorpay_payment_id = payload.razorpay_payment_id
+        payment.razorpay_signature = payload.razorpay_signature
+        db.add(payment)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Razorpay payment signature verification failed.",
+        )
+
+    payment.status = StudentPaymentStatus.PAID
+    payment.razorpay_payment_id = payload.razorpay_payment_id
+    payment.razorpay_signature = payload.razorpay_signature
+    payment.paid_at = datetime.now(timezone.utc)
+
+    existing_course_enrollment = _get_existing_course_enrollment(
+        db,
+        course_id=batch.course_id,
+        student_id=current_user.id,
+    )
+    enrollment = existing_course_enrollment or BatchEnrollment(batch_id=batch.id, student_id=current_user.id)
+
+    relative_receipt_path, receipt_public_url = generate_payment_receipt_pdf(
+        payment=payment,
+        batch=batch,
+        student=current_user,
+    )
+    payment.receipt_file_path = relative_receipt_path
+    payment.receipt_public_url = receipt_public_url
+
     db.add(payment)
     db.add(enrollment)
     db.commit()
 
-    refreshed_batch = db.scalar(_batch_checkout_query(batch_id))
+    refreshed_batch = db.scalar(_batch_checkout_query(batch.id))
     if refreshed_batch and refreshed_batch.status == BatchStatus.ACTIVE:
         seed_batch_planning(db, refreshed_batch)
         db.commit()
@@ -525,4 +740,21 @@ def pay_and_enroll_in_batch(
     return StudentEnrollmentPaymentResponse(
         payment=StudentPaymentRead.model_validate(payment),
         enrollment=_build_enrollment(created_enrollment),
+    )
+
+
+@router.post(
+    "/batches/{batch_id}/enroll",
+    response_model=StudentEnrollmentPaymentResponse,
+    status_code=status.HTTP_410_GONE,
+)
+def pay_and_enroll_in_batch(
+    batch_id: int,
+    payload: StudentBatchPaymentRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_student)],
+) -> StudentEnrollmentPaymentResponse:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Course purchase now requires Razorpay checkout and payment verification.",
     )

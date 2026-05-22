@@ -20,6 +20,7 @@ def ensure_upload_directories() -> None:
         "certificate_templates",
         "course_banners",
         "course_syllabi",
+        "payment_receipts",
         "session_resources",
     ):
         (root / child).mkdir(parents=True, exist_ok=True)

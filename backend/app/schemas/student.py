@@ -101,6 +101,33 @@ class StudentBatchPaymentRequest(BaseModel):
         return _strip_required(value)
 
 
+class StudentPaymentOrderRead(BaseModel):
+    key_id: str
+    mode: str
+    order_id: str
+    payment_id: int
+    amount: Decimal
+    amount_in_paise: int
+    currency: str
+    receipt_id: str
+    course_title: str
+    batch_id: int
+    student_name: str
+    student_email: str
+    student_contact: str | None = None
+
+
+class StudentPaymentVerifyRequest(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
+
+    @field_validator("razorpay_payment_id", "razorpay_order_id", "razorpay_signature")
+    @classmethod
+    def strip_razorpay_fields(cls, value: str) -> str:
+        return _strip_required(value)
+
+
 class StudentEducationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -248,6 +275,10 @@ class StudentPaymentRead(BaseModel):
     amount: Decimal
     payment_method: str
     reference_id: str
+    gateway_mode: str | None = None
+    razorpay_order_id: str | None = None
+    razorpay_payment_id: str | None = None
+    receipt_public_url: str | None = None
     status: StudentPaymentStatus
     paid_at: datetime | None = None
 
@@ -273,6 +304,7 @@ class StudentEnrollmentRead(BaseModel):
     next_session: StudentNextSessionRead | None = None
     recent_resources: list[StudentSessionResourceRead] = Field(default_factory=list)
     certificate: StudentCertificateRead | None = None
+    payment: StudentPaymentRead | None = None
 
 
 class StudentDashboardRead(BaseModel):

@@ -210,6 +210,26 @@ class BatchCertificateReleaseRequest(BaseModel):
         return list(dict.fromkeys(cleaned))
 
 
+class RazorpayModeUpdate(BaseModel):
+    active_mode: str
+
+    @field_validator("active_mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        cleaned = _strip_text(value).lower()
+        if cleaned not in {"test", "live"}:
+            raise ValueError("Razorpay mode must be test or live.")
+        return cleaned
+
+
+class RazorpaySettingsRead(BaseModel):
+    active_mode: str
+    test_key_id: str | None = None
+    live_key_id: str | None = None
+    test_configured: bool
+    live_configured: bool
+
+
 class SkillRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

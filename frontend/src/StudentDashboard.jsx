@@ -230,6 +230,27 @@ function CourseMedia({ course }) {
   );
 }
 
+let razorpayCheckoutScriptPromise = null;
+
+function loadRazorpayCheckout() {
+  if (window.Razorpay) {
+    return Promise.resolve();
+  }
+
+  if (!razorpayCheckoutScriptPromise) {
+    razorpayCheckoutScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("Unable to load Razorpay Checkout."));
+      document.body.appendChild(script);
+    });
+  }
+
+  return razorpayCheckoutScriptPromise;
+}
+
 function NoEnrollmentLanding({ onExplore }) {
   return (
     <section className="student-landing-grid">
@@ -609,13 +630,11 @@ function CourseDetail({
   course,
   selectedBatchId,
   checkoutStep,
-  paymentMethod,
   submitting,
   onBack,
   onStartEnroll,
   onSelectBatch,
   onContinueToPayment,
-  onPaymentMethodChange,
   onPay,
 }) {
   const finalPrice = applyDiscount(course);
@@ -663,7 +682,7 @@ function CourseDetail({
               onClick={onStartEnroll}
               disabled={activeBatches.length === 0}
             >
-              Enroll
+              Purchase Course
             </button>
           )}
         </div>
@@ -778,17 +797,8 @@ function CourseDetail({
                 </div>
 
                 <form className="stack-form" onSubmit={onPay}>
-                  <label className="field">
-                    <span>Payment Method</span>
-                    <select value={paymentMethod} onChange={(event) => onPaymentMethodChange(event.target.value)}>
-                      <option value="upi">UPI</option>
-                      <option value="card">Credit or Debit Card</option>
-                      <option value="net_banking">Net Banking</option>
-                      <option value="wallet">Wallet</option>
-                    </select>
-                  </label>
                   <button className="primary-button" type="submit" disabled={submitting === "payment"}>
-                    {submitting === "payment" ? "Processing Payment..." : "Pay Fees and Enroll"}
+                    {submitting === "payment" ? "Opening Checkout..." : "Purchase Course"}
                   </button>
                   <button className="ghost-button" type="button" onClick={onStartEnroll}>
                     Change Batch
@@ -880,6 +890,11 @@ function CourseProgressCard({ enrollment }) {
             Open Certificate
           </a>
         )}
+        {enrollment.payment?.receipt_public_url && (
+          <a href={resolveAssetUrl(enrollment.payment.receipt_public_url)} target="_blank" rel="noreferrer">
+            Open Receipt
+          </a>
+        )}
       </div>
     </article>
   );
@@ -945,7 +960,7 @@ export default function StudentDashboard({ token, user, onLogout }) {
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [checkoutStep, setCheckoutStep] = useState("catalogue");
-  const [paymentMethod, setPaymentMethod] = useState("upi");
+  const [lastReceipt, setLastReceipt] = useState(null);
 
   async function loadDashboard() {
     try {
@@ -1036,6 +1051,7 @@ export default function StudentDashboard({ token, user, onLogout }) {
     }
 
     setNotice({ type: "", message: "" });
+    setLastReceipt(null);
     if (nextSection !== "explore") {
       setSelectedCourseId("");
       setSelectedBatchId("");
@@ -1049,6 +1065,7 @@ export default function StudentDashboard({ token, user, onLogout }) {
     setSelectedBatchId("");
     setCheckoutStep("details");
     setNotice({ type: "", message: "" });
+    setLastReceipt(null);
   }
 
   function handleBackToCatalogue() {
@@ -1056,6 +1073,7 @@ export default function StudentDashboard({ token, user, onLogout }) {
     setSelectedBatchId("");
     setCheckoutStep("catalogue");
     setNotice({ type: "", message: "" });
+    setLastReceipt(null);
   }
 
   function handleStartEnrollment() {
@@ -1142,19 +1160,68 @@ export default function StudentDashboard({ token, user, onLogout }) {
     setSubmitting("payment");
     try {
       setNotice({ type: "", message: "" });
-      await apiRequest(`/api/v1/student/batches/${selectedBatchId}/enroll`, {
+      const checkoutOrder = await apiRequest(`/api/v1/student/batches/${selectedBatchId}/payment-order`, {
         method: "POST",
         token,
-        body: { payment_method: paymentMethod },
       });
+      await loadRazorpayCheckout();
+
+      const paymentResult = await new Promise((resolve, reject) => {
+        const checkout = new window.Razorpay({
+          key: checkoutOrder.key_id,
+          amount: checkoutOrder.amount_in_paise,
+          currency: checkoutOrder.currency,
+          name: "Silicon Mango Academy",
+          description: checkoutOrder.course_title,
+          order_id: checkoutOrder.order_id,
+          prefill: {
+            name: checkoutOrder.student_name,
+            email: checkoutOrder.student_email,
+            contact: checkoutOrder.student_contact || "",
+          },
+          notes: {
+            receipt_id: checkoutOrder.receipt_id,
+            batch_id: String(checkoutOrder.batch_id),
+          },
+          theme: {
+            color: "#8f6a2f",
+          },
+          handler: async (response) => {
+            try {
+              const verifiedPayment = await apiRequest("/api/v1/student/payments/verify", {
+                method: "POST",
+                token,
+                body: {
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature,
+                },
+              });
+              resolve(verifiedPayment);
+            } catch (error) {
+              reject(error);
+            }
+          },
+          modal: {
+            ondismiss: () => reject(new Error("Payment popup closed before completion.")),
+          },
+        });
+
+        checkout.on("payment.failed", (response) => {
+          reject(new Error(response.error?.description || "Payment failed."));
+        });
+        checkout.open();
+      });
+
       await loadDashboard();
       setSelectedCourseId("");
       setSelectedBatchId("");
       setCheckoutStep("catalogue");
       setActiveSection("my-courses");
+      setLastReceipt(paymentResult.payment || null);
       setNotice({
         type: "success",
-        message: "Payment successful. Course access is now available in My Courses.",
+        message: "Payment successful. Receipt generated and course access is available in My Courses.",
       });
     } catch (error) {
       setNotice({ type: "error", message: error.message || "Unable to complete enrollment." });
@@ -1207,6 +1274,19 @@ export default function StudentDashboard({ token, user, onLogout }) {
         </div>
 
         <StatusBanner notice={notice} />
+        {lastReceipt && (
+          <div className="record-item compact">
+            <div>
+              <h4>Receipt Generated</h4>
+              <p>Receipt #{lastReceipt.reference_id}</p>
+            </div>
+            {lastReceipt.receipt_public_url && (
+              <a href={resolveAssetUrl(lastReceipt.receipt_public_url)} target="_blank" rel="noreferrer">
+                Open Receipt
+              </a>
+            )}
+          </div>
+        )}
 
         {activeSection === "profile" && (
           <ProfileForm
@@ -1225,13 +1305,11 @@ export default function StudentDashboard({ token, user, onLogout }) {
               course={selectedCourse}
               selectedBatchId={selectedBatchId}
               checkoutStep={checkoutStep}
-              paymentMethod={paymentMethod}
               submitting={submitting}
               onBack={handleBackToCatalogue}
               onStartEnroll={handleStartEnrollment}
               onSelectBatch={(batchId) => setSelectedBatchId(String(batchId))}
               onContinueToPayment={handleContinueToPayment}
-              onPaymentMethodChange={setPaymentMethod}
               onPay={handlePayAndEnroll}
             />
           ) : (

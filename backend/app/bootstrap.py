@@ -98,6 +98,14 @@ def ensure_schema_extensions() -> None:
         _ensure_column("batch_sessions", "origin", "origin VARCHAR(20)")
         _ensure_column("batch_sessions", "is_customized", "is_customized BOOLEAN")
 
+    if "student_payments" in table_names:
+        _ensure_column("student_payments", "gateway_mode", "gateway_mode VARCHAR(20)")
+        _ensure_column("student_payments", "razorpay_order_id", "razorpay_order_id VARCHAR(80)")
+        _ensure_column("student_payments", "razorpay_payment_id", "razorpay_payment_id VARCHAR(80)")
+        _ensure_column("student_payments", "razorpay_signature", "razorpay_signature VARCHAR(256)")
+        _ensure_column("student_payments", "receipt_file_path", "receipt_file_path VARCHAR(500)")
+        _ensure_column("student_payments", "receipt_public_url", "receipt_public_url VARCHAR(500)")
+
     db = Session(bind=engine)
     try:
         courses = db.scalars(select(Course)).all()
