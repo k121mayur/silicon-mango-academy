@@ -7,9 +7,9 @@ services:
     container_name: silicon-academy-postgres
     restart: always
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-silicon_academy}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     # Internal exposure only. Avoids server-level conflicts and database attacks.
     expose:
       - "5432"
@@ -31,26 +31,26 @@ services:
     container_name: silicon-academy-backend
     restart: always
     environment:
-      - DEBUG=${DEBUG:-false}
-      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-silicon_academy}
-      - SECRET_KEY=${SECRET_KEY:-replace-this-for-production-very-secure-key-123}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
-      - MASTER_ADMIN_NAME=${MASTER_ADMIN_NAME:-Master Admin}
-      - MASTER_ADMIN_EMAIL=${MASTER_ADMIN_EMAIL:-admin@siliconmango.academy}
-      - MASTER_ADMIN_PASSWORD=${MASTER_ADMIN_PASSWORD:-Admin@123}
-      - DEFAULT_INSTRUCTOR_PASSWORD=${DEFAULT_INSTRUCTOR_PASSWORD:-Instructor@123}
-      - RAZORPAY_MODE=${RAZORPAY_MODE:-test}
+      - DEBUG=${DEBUG}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - MASTER_ADMIN_NAME=${MASTER_ADMIN_NAME}
+      - MASTER_ADMIN_EMAIL=${MASTER_ADMIN_EMAIL}
+      - MASTER_ADMIN_PASSWORD=${MASTER_ADMIN_PASSWORD}
+      - DEFAULT_INSTRUCTOR_PASSWORD=${DEFAULT_INSTRUCTOR_PASSWORD}
+      - RAZORPAY_MODE=${RAZORPAY_MODE}
       - RAZORPAY_TEST_KEY_ID=${RAZORPAY_TEST_KEY_ID}
       - RAZORPAY_TEST_KEY_SECRET=${RAZORPAY_TEST_KEY_SECRET}
       - RAZORPAY_LIVE_KEY_ID=${RAZORPAY_LIVE_KEY_ID}
       - RAZORPAY_LIVE_KEY_SECRET=${RAZORPAY_LIVE_KEY_SECRET}
       - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_PORT=${SMTP_PORT}
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
-      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_USE_TLS=${SMTP_USE_TLS}
     # Internal exposure only. The Nginx frontend will proxy requests internally.
     expose:
       - "8000"
